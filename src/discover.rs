@@ -37,7 +37,7 @@ use std::net::Ipv4Addr;
 ///
 /// This object can be iterated over to yield the received mDNS responses.
 pub struct Discovery {
-    service_name: String,
+    service_names: Vec<String>,
 
     mdns_sender: mDNSSender,
     mdns_listener: mDNSListener,
@@ -50,27 +50,24 @@ pub struct Discovery {
 }
 
 /// Gets an iterator over all responses for a given service on all interfaces.
-pub fn all<S>(service_name: S, mdns_query_interval: Duration) -> Result<Discovery, Error>
-where
-    S: AsRef<str>,
-{
-    interface(service_name, mdns_query_interval, Ipv4Addr::new(0, 0, 0, 0))
+pub fn all(service_names: Vec<String>, mdns_query_interval: Duration) -> Result<Discovery, Error> {
+    interface(
+        service_names,
+        mdns_query_interval,
+        Ipv4Addr::new(0, 0, 0, 0),
+    )
 }
 
 /// Gets an iterator over all responses for a given service on a given interface.
-pub fn interface<S>(
-    service_name: S,
+pub fn interface(
+    service_names: Vec<String>,
     mdns_query_interval: Duration,
     interface_addr: Ipv4Addr,
-) -> Result<Discovery, Error>
-where
-    S: AsRef<str>,
-{
-    let service_name = service_name.as_ref().to_string();
-    let (mdns_listener, mdns_sender) = mdns_interface(service_name.clone(), interface_addr)?;
+) -> Result<Discovery, Error> {
+    let (mdns_listener, mdns_sender) = mdns_interface(service_names.clone(), interface_addr)?;
 
     Ok(Discovery {
-        service_name,
+        service_names,
         mdns_sender,
         mdns_listener,
         ignore_empty: true,
@@ -89,7 +86,7 @@ impl Discovery {
 
     pub fn listen(self) -> impl Stream<Item = Result<Response, Error>> {
         let ignore_empty = self.ignore_empty;
-        let service_name = self.service_name;
+        let service_names = self.service_names;
         let response_stream = self.mdns_listener.listen().map(StreamResult::Response);
         let sender = self.mdns_sender.clone();
 
@@ -105,12 +102,10 @@ impl Discovery {
 
         let stream = select(response_stream, interval_stream);
         stream
-            .filter_map(|stream_result| {
-                async {
-                    match stream_result {
-                        StreamResult::Interval => None,
-                        StreamResult::Response(res) => Some(res),
-                    }
+            .filter_map(|stream_result| async {
+                match stream_result {
+                    StreamResult::Interval => None,
+                    StreamResult::Response(res) => Some(res),
                 }
             })
             .filter(move |res| {
@@ -120,7 +115,7 @@ impl Discovery {
                             && response
                                 .answers
                                 .iter()
-                                .any(|record| record.name == service_name)
+                                .any(|record| service_names.contains(&record.name))
                     }
                     Err(_) => true,
                 })

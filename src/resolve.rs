@@ -20,12 +20,12 @@
 //! ```
 
 use crate::{Error, Response};
-use futures_util::{StreamExt, pin_mut, TryFutureExt};
+use futures_util::{pin_mut, StreamExt, TryFutureExt};
 use std::time::Duration;
 
 /// Resolve a single device by hostname
 pub async fn one<S>(
-    service_name: &str,
+    service_names: Vec<String>,
     host_name: S,
     timeout: Duration,
 ) -> Result<Option<Response>, Error>
@@ -33,7 +33,7 @@ where
     S: AsRef<str>,
 {
     // by setting the query interval higher than the timeout we ensure we only make one query
-    let stream = crate::discover::all(service_name, timeout * 2)?.listen();
+    let stream = crate::discover::all(service_names, timeout * 2)?.listen();
     pin_mut!(stream);
 
     let process = async {
@@ -47,12 +47,14 @@ where
         None
     };
 
-    async_std::future::timeout(timeout, process).map_err(|e| e.into()).await
+    async_std::future::timeout(timeout, process)
+        .map_err(|e| e.into())
+        .await
 }
 
 /// Resolve multiple devices by hostname
 pub async fn multiple<S>(
-    service_name: &str,
+    service_names: Vec<String>,
     host_names: &[S],
     timeout: Duration,
 ) -> Result<Vec<Response>, Error>
@@ -60,7 +62,7 @@ where
     S: AsRef<str>,
 {
     // by setting the query interval higher than the timeout we ensure we only make one query
-    let stream = crate::discover::all(service_name, timeout * 2)?.listen();
+    let stream = crate::discover::all(service_names, timeout * 2)?.listen();
     pin_mut!(stream);
 
     let mut found = Vec::new();
@@ -82,6 +84,6 @@ where
 
     match async_std::future::timeout(timeout, process).await {
         Ok(()) => Ok(found),
-        Err(e) => Err(e.into())
+        Err(e) => Err(e.into()),
     }
 }

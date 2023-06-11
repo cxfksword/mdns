@@ -2,10 +2,10 @@ use crate::{Error, Response};
 
 use std::{io, net::Ipv4Addr};
 
+use async_std::net::UdpSocket;
 use async_stream::try_stream;
 use futures_core::Stream;
 use std::sync::Arc;
-use async_std::net::UdpSocket;
 
 #[cfg(not(target_os = "windows"))]
 use net2::unix::UnixUdpBuilderExt;
@@ -16,7 +16,7 @@ const MULTICAST_ADDR: Ipv4Addr = Ipv4Addr::new(224, 0, 0, 251);
 const MULTICAST_PORT: u16 = 5353;
 
 pub fn mdns_interface(
-    service_name: String,
+    service_names: Vec<String>,
     interface_addr: Ipv4Addr,
 ) -> Result<(mDNSListener, mDNSSender), Error> {
     let socket = create_socket()?;
@@ -29,8 +29,14 @@ pub fn mdns_interface(
     let recv_buffer = vec![0; 4096];
 
     Ok((
-        mDNSListener { recv: socket.clone(), recv_buffer },
-        mDNSSender { service_name, send: socket },
+        mDNSListener {
+            recv: socket.clone(),
+            recv_buffer,
+        },
+        mDNSSender {
+            service_names,
+            send: socket,
+        },
     ))
 }
 
@@ -54,8 +60,8 @@ fn create_socket() -> io::Result<std::net::UdpSocket> {
 /// An mDNS sender on a specific interface.
 #[derive(Debug, Clone)]
 #[allow(non_camel_case_types)]
-pub struct mDNSSender<> {
-    service_name: String,
+pub struct mDNSSender {
+    service_names: Vec<String>,
     send: Arc<UdpSocket>,
 }
 
@@ -64,12 +70,15 @@ impl mDNSSender {
     pub async fn send_request(&mut self) -> Result<(), Error> {
         let mut builder = dns_parser::Builder::new_query(0, false);
         let prefer_unicast = false;
-        builder.add_question(
-            &self.service_name,
-            prefer_unicast,
-            dns_parser::QueryType::PTR,
-            dns_parser::QueryClass::IN,
-        );
+        for v in self.service_names.iter() {
+            builder.add_question(
+                &v,
+                prefer_unicast,
+                dns_parser::QueryType::PTR,
+                dns_parser::QueryClass::IN,
+            );
+        }
+
         let packet_data = builder.build().unwrap();
 
         let addr = SocketAddr::new(MULTICAST_ADDR.into(), MULTICAST_PORT);
